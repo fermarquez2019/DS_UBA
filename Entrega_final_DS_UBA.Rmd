@@ -1,0 +1,444 @@
+---
+title: "Trabajo practico final Introduccion a la Ciencia de datos"
+subtitle: "Recurrencia de Accidente cerberovascular isquémico: frecuencia y factores de riesgo"
+author: |
+  | Marquez F. $^1$ 
+  <br><br>
+  | $^1$Centro de Rehabilitación de Adultos CR, FLENI, Escobar, Buenos Aires.
+  <br><br><br><br>
+  | Mail ^[Correspondencia al autor: fmarquez.mum@gmail.com]
+date: "02/08/2020"
+
+output:
+  html_document:
+    code_folding: hide
+    
+#bibliography: Path to your .bib file
+#csl: Path to your .csl file
+abstract: |
+  **Introducción:** Comprender el pronóstico a largo plazo y determinar la recurrencia de pacientes con accidente cerebrovascular (ACV) continúa siendo un desafío en la actualidad. **Objetivo:** Me propongo describir la frecuencia de recurrencia y determinar los factores de riesgo involucrados para desarrollar un modelo predictivo de clasificación binaria que permita individualizar la probabilidad de recurrencia post-ACV. **Resultados:** Se incluyeron 212 pacientes de lo cuales el 25% presentaron un nuevo ACV. Se exploraron las varibles sociodemográficas y clínicas recolectadas durante la interación del primer evento cerebrovascular. En el análisis multivariable, ninguna de las variables estudiadas fue intependiente para determinar el riesgo de recurrencias. **Conclusion:** En esta población la edad, el genero, antecedente de cancer, la gravadad del ACV, el grado de discapacidad, el tipo de tratamiento realizado ni el tratamiento trombolitico fueron variables predictoras de un nuevo evento.
+  <br><br>
+  [Link](http://github.com/fermarquez2019/DS_UBA) al repositorio en GitHub.
+
+editor_options: 
+  chunk_output_type: console
+
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      results = "hide")
+```
+
+
+## Desarrollo de la pregunta de interés
+Las características  de los pacientes con ACV durante la itnernación, influyen en el riesgo de recurrencia?
+
+* Objetivo principal: Determinar facotres de riesgo asociados a la recurrencia del ACV.
+* Objetivos secundarios:
+  * Determinar la frecuencia de recurrencia.
+  * Valorar la correlación entre variables recolectadas durante internación.
+
+* Metodología:
+  * Descripción del análisis: se explica durante el desarrollo
+  * Unidad de análisis o población: Estudio observacional de cohorte retrospectiva de pacientes con Accidente Cerebrovascular (ACV) Isquémico (excluyendo pacientes con ACV hemorrágico) evaluados en centro de Internación entre 2016 y 2020.
+
+
+
+## Carga de librerías y del dataframe
+
+
+```{r, echo=TRUE, message=FALSE}
+# Cargar librerías
+library(tidyverse)
+library(readxl)
+library(knitr)
+library(kableExtra)
+library(ggplot2)
+library(ggthemes)
+library(corrplot)
+library(dplyr)
+library(stringr)
+library(hrbrthemes)
+library(viridis)
+library(GGally)
+library(ggstatsplot)
+library(boot) 
+library(table1)
+library(finalfit)
+
+# Importar dataset
+df <- read_excel("/Users/fernandomarquez/Documents/Fleni/Investigacion/Epilepsia y ACV/recurrencias_seguimiento_incompleto.xlsx")
+
+# Eliminar colunmas no utilies
+df <- select (df,-c(ID, ...1,fecha_ingreso, fecha_egreso, control_fecha))
+
+
+# Head del dataframe
+head(df)
+
+# Nombres de las columnas
+colnames(df)
+```
+
+## Resumen del dataset
+
+```{r, results='markup'}
+# Resumen del dataframe
+summary(df)
+```
+
+## Exploracion de valores faltantes
+
+```{r, results='markup'}
+# Definir una funcion que cuente los NaNs y aplicarla al dataframe
+na_count <- sapply(df, function(y) sum(length(which(is.na(y)))))
+
+#Creo un dataframe con los valores nulos
+na_count <- data.frame(na_count)
+na_count
+```
+
+EL dataframe presenta multiples columnas repetidas y algunas de llas con valores nulos, que no son de interes para el trabajo. Seleccionaremos entonces las variables de interes para trabajar mas comodamente y con menos errores. 
+
+## Seleccion de columnas de interés 
+De acuerdo a los valores nulos y el interes de las variables para este trabajo seleccionamos y renombramos las columnas.
+
+```{r}
+
+# Ver nombres de las columnas
+colnames(df)
+
+# Seleccionar y cambiar nombre de columnas
+df<-df %>% select(edad_x, genero_x, dx, TOAST_x, ESUS, NIHSSi_x, 
+                  mRSi_x, sala_inicio, ventana, tipo_tto, trombecotmia, rTPA, ca_asociado,
+                  prev2_alta, cierre_FOP, NIHSSe_x, mRSe_x, diasTotal,
+                  diasUCV, diasUTI, diasPiso, reinternaciones,
+                  reinternacion1, reinternacion2, retiniano, criterio, tiempo_seguimiento)          %>%rename(edad=edad_x, genero=genero_x, TOAST=TOAST_x, NIHSSi=NIHSSi_x, 
+               mRSi=mRSi_x, NIHSSe=NIHSSe_x, mRSe=mRSe_x)
+
+```
+
+
+## Preprocesado y exploracion de variables categoricas
+
+
+```{r}
+# Obtener tipos de varibales
+sapply(df, typeof)
+
+# Identificar columnas categoricas y crear una lista
+cat_cols <- unlist(lapply(df, is.character))
+
+# Crear un subset solo de columnas categoricas
+data_cat <- df[ , cat_cols]   
+
+# Creo vector de frecuencias de reinternaciones
+tabla_reinternaciones <- table(data_cat$reinternaciones)
+
+# Creo un df de frecuencias de reinternaciones
+tabla_reinternaciones = as.data.frame(tabla_reinternaciones)
+
+# Computar la posicion de las etiquetas
+tabla_reinternaciones <- tabla_reinternaciones %>% 
+                          arrange(desc(Var1)) %>%
+                          mutate(prop = Freq / sum(tabla_reinternaciones$Freq) *100) %>%
+                          mutate(ypos = cumsum(prop)- 0.5*prop )
+
+# Grafico de torta basico
+ggplot(tabla_reinternaciones, aes(x="", y=Freq, fill=Var1)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  coord_polar("y", start=0) +
+  theme_void() + # remover background, grid, numeric labels
+  theme(legend.position="none") +
+  geom_text(aes(y = ypos, label = Var1), color = "white", size=6) +
+  scale_fill_brewer(palette="Set1") +
+  ggtitle("Cantidad de pacientes con recurrencia de ACV")
+
+```
+
+53 de 159 pacientes presentaron una al menos una reinternación. Definiremos operativamente la recurrencia del ACV como los pacientes que presentaron una reinternación, ya que el dataset fue cargado bajo este criterio. Por lo tanto la frecuencia relativa de recurrencia de ACV es del 25%.
+
+```{r}
+
+# Creamos un nuevo dataframe con subgrupos por genero
+df2 <- df %>% 
+  group_by(genero, reinternaciones) %>% 
+  tally() %>% 
+  complete(reinternaciones, fill = list(n = 0)) %>% 
+  mutate(percentage = n / sum(n) * 100)
+
+# Ploteamos desagregando por grupos
+ggplot(df2, aes(reinternaciones, percentage, fill = genero)) + 
+  geom_bar(stat = 'identity', position = 'dodge') +
+  theme_bw()
+
+```
+
+La cantidad de recurrencias no es muy diferente al desagregar por genero.
+
+
+```{r}
+
+# Creamos un nuevo dataframe con subgrupos de tipo de tratamiento
+df2 <- df %>% 
+  group_by(tipo_tto, reinternaciones) %>% 
+  tally() %>% 
+  complete(reinternaciones, fill = list(n = 0)) %>% 
+  mutate(percentage = n / sum(n) * 100)
+
+# Ploteamos desagregando por grupos
+ggplot(df2, aes(reinternaciones, percentage, fill = tipo_tto)) + 
+  geom_bar(stat = 'identity', position = 'dodge') +
+  theme_bw()
+
+```
+
+Podemos observar que los pacientes que si recurren parecen tener mas tratamientos quirurgicos.
+
+
+```{r}
+# Creamos un nuevo dataframe con subgrupos rTPA (tratamiento trombolico)
+df2 <- df %>% 
+  group_by(rTPA, reinternaciones) %>% 
+  tally() %>% 
+  complete(reinternaciones, fill = list(n = 0)) %>% 
+  mutate(percentage = n / sum(n) * 100)
+
+# Ploteamos desagregando por grupos
+ggplot(df2, aes(reinternaciones, percentage, fill = rTPA)) + 
+  geom_bar(stat = 'identity', position = 'dodge') 
+```
+
+Al desagregar por tratamiento trombolítico rTPA, pareciera haber una tendencia diferente entre los grupos. El grupo de pacientes que no tuvieron recurrencias era mas frecuente que fuesen trombolizados a que no, lo inverso ocurre en el grupo que si recurrieron. 
+
+Veamos la gravedad del ACV segun la puntuación de la escala NIHSS  al ingreso, desagregado por las causas según la clasifiación de TOAST^[https://www.ahajournals.org/doi/abs/10.1161/01.str.24.1.35] 
+
+
+```{r}
+# Boxplot agrupados por clasificacion etiológica del ACV, desagregado por recurrencia
+ggplot(df, aes(x=reinternaciones, y=NIHSSi, fill=TOAST)) + 
+    geom_boxplot()
+```
+
+Lo primero que observamos es algunos outliers, que puntúan bastante mejor que la media e incluso el 3er cuartil. Esto se puede observar especialmente en el grupo de NO recurrencia (lo cual resulta logico ya que ese grupo incluye más pacientes). Tambien podemos observar que según la clasificación etiol[ogica de TOAST, el subgrupo Otras causas, fue la etiología más frecuente en el grupo No recurencia y la etiología pequeños vasos en el grupo que recurrieron. No es lo que uno esperaría en este último grupo.
+
+
+
+## Preprocesado de variables numéricas
+
+Primero crearemos un dataset de variables numericas para no sobreescribir el dataset original, convirtiendo la variable dependiente (recurrencia) en una variable numérica para poder ampliar el análisis exploratorio.
+
+```{r}
+# Repasamos tipos de variables
+sapply(df, typeof)
+
+# Identificar columnas numericas y crear una lista
+num_cols <- unlist(lapply(df, is.numeric))
+
+# Crear un subset solo de columnas numericas
+data_num <- df[ , num_cols]   
+
+```
+
+## Exploracion de variables numericas y categoricas en una Tabla 1
+
+```{r, warning=FALSE, message=FALSE, results='markup'}
+analisis<-df
+
+# Agregar columna reinternaciones al nuevo dataset para tabla 1 para tabla
+analisis<- cbind(recurrencia = c(analisis$reinternaciones), analisis)
+
+# Creo un vector de la columna recurrencia codficada como si o no
+recurrencia_v<-c(analisis$recurrencia)
+
+# Mepeo/recodifico los valores que me da el vector (no lo convirtio en 1 y el si lo convirtio en 2)
+analisis$recurrencia <- recode(recurrencia_v,'1'=0, '2'=1)
+
+# Seteo etiquetas de tabla 1
+label(analisis$genero)       <- "Genero"
+label(analisis$edad)       <- "Edad"
+label(analisis$TOAST)     <- "Clasificación TOAST"
+label(analisis$NIHSSi) <- "NIHSS al ingreso"
+label(analisis$mRSi) <- "Escala de Rankin Mdoifcada al ingreso"
+label(analisis$sala_inicio) <- "Sala de internación al ingreso"
+label(analisis$tipo_tto) <- "Tipo de tratmiento recibido"
+label(analisis$rTPA) <- "Trombolisis"
+label(analisis$ca_asociado) <- "Antecedente de cancer"
+label(analisis$NIHSSe) <- "NIHSS al egreso"
+label(analisis$diasTotal) <- "Total de días de internación"
+
+# Seteo las unidades de la tabla 1
+units(analisis$edad)       <- "años"
+units(analisis$diasTotal)       <- "dias"
+
+# Ploteo la tabla 1
+tabla1<-table1(~ genero + edad + TOAST + NIHSSi + mRSi + sala_inicio + tipo_tto + rTPA + ca_asociado + NIHSSe + diasTotal | recurrencia, data=analisis,  overall="Total")
+
+tabla1
+
+```
+<br>
+En la Tabla 1 se analizó las variables numericas mediante la media, pero observando el valor del desvío estándar, es evidente que deben tener distribuciones no normales, ya que restando el desvío estándar a la media, los valores mínimos serían negativos y dada la naturaleza de estas viarables, esto no es posible. Sería interesante explorar más en profundidad las distribuciones.
+
+## Distribuciones de las variables numericas
+
+Realizamos un analisis exploratorio con Histogramas para valorar graficamente las distribuciones
+
+```{r, warning=FALSE, message=FALSE}
+
+# Crear mutiples historgamas de exploración
+ggplot(gather(data_num), aes(value)) + 
+    geom_histogram(bins = 10) + 
+    facet_wrap(~key, scales = 'free_x')
+
+```
+
+Pareciera que algunas variables como por ejemeplo edad y tiempo de seguimiento pudiesen tener distribucion normal, pero buscaremos los estadísticos generando una funcion en la cual aplique el test de Shapiro Wilk al subset de variables numericas defenido anteriormente (data_num).
+
+Otra observación es que pareciera que la escala NIHSS (que determina la gravedad del evento cerebro vascular) al egreso impresiona presentar una tendencia a ser menor que al ingreso, lo cual hablaria de una mejoría de los pacientes. Esto es habitual de ver el practica, una pregunta sería si tiene algun tipo de correlación con alguna variable.
+
+
+```{r, results="markup"}
+
+# Genero una funcion en la cual aplique el test de Shapiro al subset de varibales numericas
+lshap <- lapply(data_num, shapiro.test)
+# Genero un resumen de los resultados con los estdísticos de interés
+lres <- sapply(lshap, `[`, c("statistic","p.value"))
+lres
+```
+
+Podemos ver que ninguna de las variables tiene una distribución normal. 
+<br>
+Ahora exploraremos algunas variables numéricas mediante una matriz de plots, para valorar a grandes rasgos, si hay alguna de ellas que separe mejor los grupos de estudio.
+
+```{r}
+
+# Agregar columna reinternaciones al subset de variables numericas
+data_num<- cbind(recurrencia = c(df$reinternaciones), data_num)
+
+# Eliminamos algunas columnas que no nos itneresa plotear
+data_num <- select (data_num,-c(diasUTI, diasPiso, diasUCV, tiempo_seguimiento))
+
+# Ploteamos las columnas de interés separando por grupos
+ggpairs(data_num, 
+        aes(color = recurrencia), 
+        upper = list(continuous = wrap("cor", size = 1)),
+        #upper = list(continuous = "density", combo = "dot_no_facet"),
+        lower = list(continuous = "points", combo = "box_no_facet")
+        ) #+ scale_fill_manual(values = my_colors)
+
+```
+
+No pareciera que las variables numericas estudiadas separen bien los datos de acuerdo al resultado de interés (recurrencia del evento cerebrovascular).
+
+Intentaremos obtener más información con un grafico de correlaciones mediaten el Método de Spearman, considerando que las variables no tienen distribución normal.
+
+```{r}
+
+# Creo un vector de la columna recurrencia codficada como si o no
+recurrencia_v<-c(data_num$recurrencia)
+
+# Mepeo/recodifico los valores que me da el vector (no lo convirtio en 1 y el si lo convirtio en 2)
+data_num$recurrencia <- recode(recurrencia_v,'1'=0, '2'=1)
+
+#Convertir al dataframe en una matriz numerica para poder plotear un heatmap 
+data_num_matrix<- as.matrix(data_num[,])
+
+
+# Creo una matriz de correlaciónes entre variables con el metodo Spearman
+cc = cor(data_num_matrix, method = "spearman")
+
+# Ploteo el grafico de correlaciones ordenado de acuerdo al valor de Rho de Spearman y gregando los coeficientes de correlacion en el grafico 
+corr2<- corrplot(cc, tl.col = "black", order = "hclust", hclust.method = "average", addrect = 4, tl.cex = 0.7, method = "square", addCoef.col = TRUE, number.cex=0.5)
+
+```
+
+Existen algunas correlaciones moderadas entre las escalas de puntiación de severidad de ACV al ingreso y al egreso (NIHSSi-NIHSSe) y con la escala de Rankin Modificada (discapacidad) (mRSi-mRSe). Estas correlaciones son esperables y no son clinicamente relevantes. No impresiona que la recurrencia del evento presente correlaciones relevantes con las variables numéricas ploteadas.
+
+Para tener mas certezas realizaremos un análisis unviariado.
+
+```{r, results="markup"}
+
+# Realizar un análisis univariado
+
+explanatory = c('edad', 'genero', 'TOAST', 'NIHSSi', 'mRSi', 'sala_inicio', 'tipo_tto', 'rTPA', 'ca_asociado', 'NIHSSe', 'diasTotal')
+
+dependent = "recurrencia" 
+analisis_univariado<-analisis %>%
+                      summary_factorlist(dependent, explanatory,
+                      p=TRUE, add_dependent_label=TRUE)
+
+analisis_univariado
+```
+
+Ningun valor de p fue estadisticametne significativo en el análisis univariado. 
+
+
+## Modelo de regresión
+
+Para cumplir con el objetivo de realizar una regresión realizaré un modelo de clasificacion binaria mediante una regresión logística
+
+```{r, warning=FALSE, message=FALSE, results='markup'}
+
+#Seleciono variables interes para el modelo
+analisis<-analisis %>% select(genero, TOAST, tipo_tto, rTPA, ca_asociado, edad, NIHSSi,mRSi,NIHSSe, diasTotal,recurrencia) 
+
+# Crear el training set
+input_ones <- analisis[which(analisis$recurrencia == 1), ]  # todos 1's
+input_zeros <- analisis[which(analisis$recurrencia == 0), ]  # todos 0's
+
+set.seed(42)  # para que sea reproducible
+
+input_ones_training_rows <- sample(1:nrow(input_ones), 0.7*nrow(input_ones))  # 1's 
+input_zeros_training_rows <- sample(1:nrow(input_zeros), 0.7*nrow(input_ones))  # 0's 
+
+training_ones <- input_ones[input_ones_training_rows, ]  
+training_zeros <- input_zeros[input_zeros_training_rows, ]
+trainingData <- rbind(training_ones, training_zeros)  
+
+# Crear el Test set
+test_ones <- input_ones[-input_ones_training_rows, ]
+test_zeros <- input_zeros[-input_zeros_training_rows, ]
+testData <- rbind(test_ones, test_zeros)  
+
+library(smbinning)
+
+# segregar variables continuas y categoricas
+factor_vars <- c ("genero", 'TOAST', 'tipo_tto', 'rTPA', 'ca_asociado')
+continuous_vars <- c("edad", "NIHSSi",'mRSi','NIHSSe', 'diasTotal')
+
+iv_df <- data.frame(VARS=c(factor_vars, continuous_vars), IV=numeric(10))  # init for IV 
+
+# computar variables categoricas
+for(factor_var in factor_vars){
+  smb <- smbinning.factor(trainingData, y="recurrencia", x=factor_var)  # WOE table
+  if(class(smb) != "character"){ # heck if some error occured
+    iv_df[iv_df$VARS == factor_var, "IV"] <- smb$iv
+  }
+}
+
+# computar variables continuas
+for(continuous_var in continuous_vars){
+  smb <- smbinning(trainingData, y="recurrencia", x=continuous_var)  # WOE table
+  if(class(smb) != "character"){  # any error while calculating scores.
+    iv_df[iv_df$VARS == continuous_var, "IV"] <- smb$iv
+  }
+}
+
+iv_df <- iv_df[order(-iv_df$IV), ]  # ordenar
+
+logitMod <- glm(recurrencia ~ edad + genero + TOAST + NIHSSi + tipo_tto + rTPA + + ca_asociado, data=trainingData, family=binomial(link="logit"))
+
+predicted <- plogis(predict(logitMod, testData))  # predicted scores
+# o
+predicted <- predict(logitMod, testData, type="response")  # predicted scores
+
+# Resultados
+summary(logitMod)
+
+
+```
+
+Como era de esperar (considerando el análisis univariado) ninguna de las variables estudiadas determinó la recurrencia de los eventos cerebrovasculares.Se ve claramente que el modelo no es mejor que el azar.
